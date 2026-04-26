@@ -73,10 +73,19 @@ export default function ChatPage() {
       <section className="mx-auto flex min-h-svh w-full max-w-5xl flex-col border-x border-zinc-200 bg-white">
         <header className="flex flex-col gap-4 border-b border-zinc-200 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <div>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <h1 className="text-lg font-semibold">AI Chat</h1>
-              <Link className="text-sm text-zinc-500 hover:text-zinc-950" href="/tools">
-                Tools 示例
+              <Link
+                className="text-sm text-zinc-500 hover:text-zinc-950"
+                href="/tools"
+              >
+                文件 tools
+              </Link>
+              <Link
+                className="text-sm text-zinc-500 hover:text-zinc-950"
+                href="/mcp"
+              >
+                MCP 示例
               </Link>
             </div>
             <p className="mt-1 text-sm text-zinc-500">

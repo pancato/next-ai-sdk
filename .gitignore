@@ -15,6 +15,7 @@
 
 # AI SDK file-tool demo output
 /data/tool-files/
+/data/mcp-notes/
 
 # next.js
 /.next/

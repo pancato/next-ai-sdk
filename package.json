@@ -13,12 +13,14 @@
     "@ai-sdk/mcp": "^1.0.36",
     "@ai-sdk/moonshotai": "^2.0.16",
     "@ai-sdk/react": "^3.0.170",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "ai": "^6.0.168",
     "next": "16.2.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "streamdown": "^2.5.0",
-    "vercel-minimax-ai-provider": "^0.0.2"
+    "vercel-minimax-ai-provider": "^0.0.2",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

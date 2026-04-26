@@ -8,8 +8,13 @@ const examples = [
   },
   {
     href: "/tools",
-    title: "Tools 示例",
-    description: "路由 /tools，API /api/tools，演示 tools、前端确认和 approval。",
+    title: "文件 Tools",
+    description: "路由 /tools，API /api/tools，演示真实文件读写和 approval。",
+  },
+  {
+    href: "/mcp",
+    title: "MCP 示例",
+    description: "路由 /mcp，API /api/mcp，连接本地 stdio MCP server。",
   },
 ];
 
@@ -26,7 +31,7 @@ export default function Home() {
           </p>
         </div>
 
-        <div className="mt-8 grid gap-3 sm:grid-cols-2">
+        <div className="mt-8 grid gap-3 sm:grid-cols-3">
           {examples.map((example) => (
             <Link
               className="rounded-md border border-zinc-200 bg-white p-5 transition-colors hover:border-zinc-300 hover:bg-zinc-50"
