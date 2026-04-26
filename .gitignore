@@ -13,6 +13,9 @@
 # testing
 /coverage
 
+# AI SDK file-tool demo output
+/data/tool-files/
+
 # next.js
 /.next/
 /out/
