@@ -5,7 +5,14 @@ import {
   tool,
   type UIMessage,
 } from "ai";
-import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 
 import { DEFAULT_CHAT_MODEL, getChatModel } from "@/lib/models";
@@ -424,9 +431,7 @@ async function listFilesRecursively(
     const entries = await readdir(directory, { withFileTypes: true });
     const files = await Promise.all(
       entries.map(async (entry) => {
-        const relativePath = prefix
-          ? `${prefix}/${entry.name}`
-          : entry.name;
+        const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
         const fullPath = path.join(directory, entry.name);
 
         if (entry.isDirectory()) {

@@ -12,6 +12,18 @@ const examples = [
     description: "路由 /tools，API /api/tools，演示真实文件读写和 approval。",
   },
   {
+    href: "/agent",
+    title: "Agent",
+    description:
+      "路由 /agent，API /api/agent，演示 ToolLoopAgent 服务端自动循环。",
+  },
+  {
+    href: "/agent-tools-guide",
+    title: "Agent / Tools 指南",
+    description:
+      "专门解释 /agent、/tools、streamText 和 ToolLoopAgent 的区别。",
+  },
+  {
     href: "/mcp",
     title: "MCP 示例",
     description: "路由 /mcp，API /api/mcp，连接本地 stdio MCP server。",
@@ -31,7 +43,7 @@ export default function Home() {
           </p>
         </div>
 
-        <div className="mt-8 grid gap-3 sm:grid-cols-3">
+        <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {examples.map((example) => (
             <Link
               className="rounded-md border border-zinc-200 bg-white p-5 transition-colors hover:border-zinc-300 hover:bg-zinc-50"

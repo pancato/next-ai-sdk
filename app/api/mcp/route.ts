@@ -86,7 +86,6 @@ export async function POST(req: Request) {
       ...validateUserMcpServers(mcpServers).map((server) => server.id),
     ];
 
-    console.log("🚀 ~ file: route.ts:101 ~ mcpTools:", mcpTools);
     const result = streamText({
       model: getChatModel(model),
       system: [
