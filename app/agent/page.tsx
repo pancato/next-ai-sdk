@@ -266,20 +266,24 @@ export default function AgentPage() {
                     <div className="mt-2 rounded-md border border-zinc-200 bg-white p-4 leading-6">
                       <ul className="list-inside list-disc space-y-1">
                         <li>
-                          <strong>/tools</strong>：后端每次只执行一轮 tool
-                          call，前端通过{" "}
+                          <strong>/tools</strong>：后端直接用 streamText
+                          处理当前请求里的工具调用；需要继续推理时，前端可以通过{" "}
                           <code className="rounded bg-zinc-100 px-1 text-xs">
                             sendAutomaticallyWhen
                           </code>{" "}
-                          重新发送消息来触发下一轮，往返多次
+                          把工具结果或 approval response 再发回服务端，形成多次往返
                         </li>
                         <li>
                           <strong>/agent</strong>：后端用 ToolLoopAgent
-                          自动循环；遇到需要 approval 的工具会暂停，批准后继续同一个任务
+                          在服务端内部推进普通工具循环；遇到 needsApproval
+                          工具会暂停，把 approval 交给前端
                         </li>
                         <li>
-                          这个页面把 approval 状态也展示出来，方便观察 agent loop
-                          如何被人工确认打断再恢复
+                          <code className="rounded bg-zinc-100 px-1 text-xs">
+                            sendAutomaticallyWhen
+                          </code>{" "}
+                          不是两者的分界线。这个 /agent 页面也用了它，只是用途是 approval
+                          后自动续发，让 agent loop 恢复
                         </li>
                       </ul>
                     </div>

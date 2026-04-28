@@ -7,7 +7,7 @@ const routeComparison = [
     points: [
       "API route 直接调用 streamText，模型在一次回复里生成 tool call。",
       "工具调用和结果会作为 message parts 流到前端，页面可以展示每个工具状态。",
-      "需要下一轮推理时，前端用 sendAutomaticallyWhen 自动把工具结果再发回服务端。",
+      "需要继续推理时，useChat 可以用 sendAutomaticallyWhen 在工具结果或 approval response 完成后自动续发请求。",
       "适合把工具过程暴露给用户，特别是需要 approval 的文件删除、写入等操作。",
     ],
   },
@@ -16,8 +16,8 @@ const routeComparison = [
     subtitle: "ToolLoopAgent 服务端自动循环",
     points: [
       "API route 创建 ToolLoopAgent，把 instructions、tools、stopWhen 组合成一个 agent。",
-      "agent.stream 会在服务端反复执行：模型思考、调用工具、读取结果、决定下一步。",
-      "前端只发起一次请求，不负责驱动下一轮工具循环。",
+      "agent.stream 会在一次服务端请求内反复执行：模型思考、调用普通工具、读取结果、决定下一步。",
+      "遇到 needsApproval 工具时，agent loop 会暂停；前端同样可以用 sendAutomaticallyWhen 在用户批准或拒绝后续发请求。",
       "适合代码分析、检索、写报告这类需要自主拆解任务的流程。",
     ],
   },
@@ -69,7 +69,11 @@ const rules = [
   },
   {
     label: "是否需要前端参与",
-    text: "需要用户确认、展示工具卡片、补充工具结果时，/tools 这种 streamText + useChat 模式更直观。",
+    text: "需要用户确认、展示工具卡片、补充工具结果时，streamText + useChat 模式更直观；Agent 遇到 approval 时也会回到前端参与。",
+  },
+  {
+    label: "sendAutomaticallyWhen",
+    text: "它不是 /tools 和 /agent 的分界线，而是 useChat 的自动续发策略。/tools 常用它驱动下一轮工具结果提交；/agent 常在 approval response 后用它恢复 agent loop。",
   },
   {
     label: "是否需要复用",
