@@ -48,6 +48,7 @@ return result.toUIMessageStreamResponse();`,
       "任务需要 agent 自主推进多步工具调用，直到完成或触发停止条件。",
       "你想把 instructions、工具集、循环停止规则封装成一个可复用对象。",
       "工具基本由服务端拥有，不需要每一步都等待前端确认。",
+      "敏感工具也可以设置 needsApproval；agent loop 会在该工具前暂停，等用户确认后继续。",
       "任务更像工作流：分析项目、查资料、读写报告、连续检索和汇总。",
     ],
     snippet: `const agent = new ToolLoopAgent({
@@ -77,6 +78,14 @@ const rules = [
   {
     label: "成本和安全",
     text: "两者都应该设置停止条件或明确续发策略；agent 自主循环能力更强，也更需要限制步数和工具权限。",
+  },
+  {
+    label: "approval 场景",
+    text: "删除、付款、发邮件、执行命令、写数据库、写文件、调用昂贵或外部副作用 API 时，应该考虑给工具设置 needsApproval。",
+  },
+  {
+    label: "前端渲染",
+    text: "工具卡应该优先展示 toolName、toolCallId、state、input、output、approval、metadata 和完整原始 UI part；先给摘要，再给可展开细节。",
   },
 ];
 
@@ -207,7 +216,8 @@ export default function AgentToolsGuidePage() {
             <code className="mx-1 rounded bg-amber-100 px-1 py-0.5 text-xs">
               app/api/agent/route.ts
             </code>
-            是 ToolLoopAgent 教学样板。
+            是 ToolLoopAgent 教学样板，其中 writeReport 演示了 agent 工具的
+            needsApproval 流程。
           </div>
         </section>
       </section>

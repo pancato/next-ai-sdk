@@ -42,16 +42,19 @@ export async function POST(req: Request) {
       instructions: [
         "你是一个代码分析 Agent，运行在 Vercel AI SDK 的 ToolLoopAgent 之上。",
         "你拥有 4 个工具：listFiles、readFile、searchFiles、writeReport。",
+        "writeReport 会真实写入 markdown 报告，因此需要用户 approval 后才能执行。",
         "",
         "## 工作流程",
         "",
         "1. 先调用 listFiles 了解项目文件结构",
         "2. 再用 readFile 深入阅读源文件",
         "3. 必要时用 searchFiles 搜索特定模式",
-        "4. 用 writeReport 输出结构化分析报告",
+        "4. 如果用户要求生成报告，用 writeReport 输出结构化分析报告，并等待用户 approval",
         "",
         "每次工具调用后，根据之前的结果自主决定下一步做什么。",
-        "所有工具调用都在服务端自动循环完成，无需用户介入。",
+        "普通工具调用会在服务端自动循环完成。",
+        "遇到需要 approval 的 writeReport 时，暂停循环并等待用户在前端批准或拒绝。",
+        "如果用户拒绝 writeReport，不要重复请求同一个写入操作，改为说明报告未写入。",
         "最终回复用中文，先总结你的分析步骤（调用了哪些工具、看到了什么），再给出结论。",
       ].join("\n"),
       tools: {
@@ -156,7 +159,7 @@ export async function POST(req: Request) {
 
         writeReport: tool({
           description:
-            "Write a structured analysis report as a markdown file in the workspace reports/ directory.",
+            "Write a structured analysis report as a markdown file in the workspace reports/ directory. This mutates project files and requires user approval before execution.",
           inputSchema: jsonSchema<{
             filename: string;
             content: string;
@@ -175,6 +178,7 @@ export async function POST(req: Request) {
             required: ["filename", "content"],
             additionalProperties: false,
           }),
+          needsApproval: true,
           execute: async ({ filename, content }) => {
             if (!filename.endsWith(".md")) {
               throw new Error("Report filename must end with .md");

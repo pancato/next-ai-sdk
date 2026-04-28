@@ -5,6 +5,7 @@ import {
   DefaultChatTransport,
   getToolName,
   isToolUIPart,
+  lastAssistantMessageIsCompleteWithApprovalResponses,
   type DynamicToolUIPart,
   type ToolUIPart,
   type UIMessage,
@@ -40,7 +41,7 @@ type ChatMessagePart = UIMessage["parts"][number];
 const DEMO_TASKS = [
   "分析这个项目的结构和代码质量",
   "找出所有 TODO 和 FIXME 注释",
-  "读取所有源文件并写一份分析报告",
+  "读取所有源文件并写一份分析报告，等我批准后再保存",
   "这个项目有什么潜在问题？",
 ];
 
@@ -48,8 +49,18 @@ export default function AgentPage() {
   const [input, setInput] = useState("");
   const [selectedModel, setSelectedModel] = useState(DEFAULT_CHAT_MODEL);
   const scrollAnchorRef = useRef<HTMLDivElement>(null);
-  const { messages, sendMessage, status, stop, error, clearError } = useChat({
+  const {
+    messages,
+    sendMessage,
+    status,
+    stop,
+    error,
+    clearError,
+    addToolApprovalResponse,
+  } = useChat({
     transport: new DefaultChatTransport({ api: "/api/agent" }),
+    sendAutomaticallyWhen: ({ messages }) =>
+      lastAssistantMessageIsCompleteWithApprovalResponses({ messages }),
   });
   const isBusy = status === "submitted" || status === "streaming";
   const selectedModelLabel = useMemo(
@@ -82,6 +93,10 @@ export default function AgentPage() {
     await sendMessage({ text }, { body: { model: selectedModel } });
   }
 
+  function continueOptions() {
+    return { body: { model: selectedModel } };
+  }
+
   function renderMessagePart(part: ChatMessagePart, index: number) {
     if (part.type === "text") {
       return <Fragment key={index}>{part.text}</Fragment>;
@@ -92,6 +107,22 @@ export default function AgentPage() {
         <ToolPart
           key={part.toolCallId}
           part={part}
+          onApprove={(id, reason) =>
+            addToolApprovalResponse({
+              id,
+              approved: true,
+              reason,
+              options: continueOptions(),
+            })
+          }
+          onDeny={(id, reason) =>
+            addToolApprovalResponse({
+              id,
+              approved: false,
+              reason,
+              options: continueOptions(),
+            })
+          }
           isLatestAgentMessage={
             status === "streaming" &&
             messages.length > 0 &&
@@ -178,12 +209,17 @@ export default function AgentPage() {
             <div className="text-sm leading-6 text-amber-800">
               <p>
                 <strong>ToolLoopAgent</strong> 在服务端自动执行 &ldquo;思考 →
-                调工具 → 看结果 → 再思考&rdquo; 循环，无需前端介入。
+                调工具 → 看结果 → 再思考&rdquo; 循环。普通工具无需前端介入，
+                但
                 <code className="mx-1 rounded bg-amber-100 px-1 py-0.5 text-xs">
-                  maxSteps
+                  needsApproval
                 </code>
-                控制最大循环次数。下方是 data/agent-workspace/
-                里的示例项目，你可以让 Agent 去分析它。
+                工具会暂停循环，等待用户批准后再执行。
+                <code className="mx-1 rounded bg-amber-100 px-1 py-0.5 text-xs">
+                  stopWhen
+                </code>
+                控制最大循环次数。每张工具卡都会展示 toolCallId、状态流、
+                input、output、approval 和原始 UI part，方便看清楚工具调用全过程。
               </p>
             </div>
           </div>
@@ -199,7 +235,8 @@ export default function AgentPage() {
                   </h2>
                   <p className="mt-3 text-sm leading-6 text-zinc-500">
                     Agent 会自动探索 workspace、读取文件、搜索代码模式，按需调用工具，
-                    最终给出分析结论。整个过程在服务端一步完成。
+                    最终给出分析结论。工具调用会展开显示完整输入、输出、状态和
+                    approval 信息；保存报告的 writeReport 工具需要先经过你的 approval。
                   </p>
                   <div className="mt-6 flex flex-col gap-2">
                     <p className="text-xs font-medium text-zinc-600">
@@ -238,10 +275,11 @@ export default function AgentPage() {
                         </li>
                         <li>
                           <strong>/agent</strong>：后端用 ToolLoopAgent
-                          自动循环，一次请求完成所有 tool 调用后返回最终结果
+                          自动循环；遇到需要 approval 的工具会暂停，批准后继续同一个任务
                         </li>
                         <li>
-                          Agent 的 tool 调用在服务端日志可见，前端只看到最终流
+                          这个页面把 approval 状态也展示出来，方便观察 agent loop
+                          如何被人工确认打断再恢复
                         </li>
                       </ul>
                     </div>
@@ -332,48 +370,231 @@ export default function AgentPage() {
 type ToolPartProps = {
   part: ToolUIPart | DynamicToolUIPart;
   isLatestAgentMessage?: boolean;
+  onApprove: (approvalId: string, reason: string) => void;
+  onDeny: (approvalId: string, reason: string) => void;
 };
 
-function ToolPart({ part, isLatestAgentMessage }: ToolPartProps) {
+function ToolPart({
+  part,
+  isLatestAgentMessage,
+  onApprove,
+  onDeny,
+}: ToolPartProps) {
   const toolName = getToolName(part);
   const title = toolLabels[toolName] ?? toolName;
+  const approval = part.approval;
+  const providerMetadataSections = getProviderMetadataSections(part);
+  const rawInput = "rawInput" in part ? part.rawInput : undefined;
+  const toneClassName = getToolPartToneClassName(
+    part.state,
+    isLatestAgentMessage,
+  );
+  const outputSummary =
+    part.state === "output-available"
+      ? summarizeToolOutput(toolName, part.output)
+      : getNoOutputText(part.state);
 
   return (
     <div
-      className={`rounded-md border p-3 text-sm text-zinc-800 ${
-        part.state === "output-available"
-          ? "border-emerald-200 bg-emerald-50"
-          : part.state === "output-error"
-            ? "border-red-200 bg-red-50"
-            : isLatestAgentMessage
-              ? "border-sky-200 bg-sky-50"
-              : "border-zinc-200 bg-white"
-      }`}
+      className={`rounded-md border p-3 text-sm text-zinc-800 ${toneClassName}`}
     >
-      <div className="flex items-center justify-between gap-3">
-        <span className="font-medium text-zinc-950">{title}</span>
-        <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500">
-          {stateLabels[part.state] ?? part.state}
-        </span>
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium text-zinc-950">{title}</span>
+              <code className="rounded bg-white/80 px-1.5 py-0.5 text-xs text-zinc-600">
+                {toolName}
+              </code>
+            </div>
+            <p className="mt-1 text-xs leading-5 text-zinc-600">
+              {toolDescriptions[toolName] ??
+                "模型正在调用一个工具。下面会展示这次调用的输入、状态和返回数据。"}
+            </p>
+          </div>
+          <span className="w-fit rounded-full bg-white/80 px-2 py-0.5 text-xs font-medium text-zinc-600">
+            {stateLabels[part.state] ?? part.state}
+          </span>
+        </div>
+
+        <ToolStateTimeline part={part} />
+
+        <div className="grid gap-2 sm:grid-cols-2">
+          <ToolFact label="工具名" mono value={toolName} />
+          <ToolFact label="UI part 类型" mono value={part.type} />
+          <ToolFact label="toolCallId" mono value={part.toolCallId} />
+          <ToolFact label="当前状态" value={part.state} mono />
+          <ToolFact
+            label="状态含义"
+            value={stateDescriptions[part.state] ?? "等待更多流式事件。"}
+          />
+          <ToolFact
+            label="执行位置"
+            value={
+              part.providerExecuted
+                ? "Provider 执行"
+                : "应用服务端 execute 执行"
+            }
+          />
+          {part.title ? <ToolFact label="标题" value={part.title} /> : null}
+          {"preliminary" in part && part.preliminary !== undefined ? (
+            <ToolFact
+              label="preliminary"
+              value={part.preliminary ? "是，可能还会更新" : "否"}
+            />
+          ) : null}
+          {approval ? (
+            <ToolFact label="approvalId" mono value={approval.id} />
+          ) : null}
+          {approval?.approved !== undefined ? (
+            <ToolFact
+              label="approval 决策"
+              value={approval.approved ? "已批准" : "已拒绝"}
+            />
+          ) : null}
+          {approval?.reason ? (
+            <ToolFact label="approval 原因" value={approval.reason} />
+          ) : null}
+        </div>
+
+        <div className="grid gap-2 lg:grid-cols-2">
+          <ToolInsight
+            title="调用意图"
+            text={summarizeToolIntent(toolName, part.input)}
+          />
+          <ToolInsight title="输出摘要" text={outputSummary} />
+        </div>
       </div>
 
-      {part.type === "tool-invocation" ? (
-        <div className="mt-2 rounded-md bg-white/80 p-2 font-mono text-xs leading-5 text-zinc-600">
-          {formatToolInput(part)}
-        </div>
+      <ToolSection
+        badge={getValueSizeLabel(part.input)}
+        title="输入参数 input"
+      >
+        <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md bg-white/80 p-3 font-mono text-xs leading-5 text-zinc-700">
+          {formatJson(part.input)}
+        </pre>
+      </ToolSection>
+
+      {rawInput !== undefined ? (
+        <ToolSection
+          badge={getValueSizeLabel(rawInput)}
+          title="原始输入 rawInput"
+        >
+          <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md bg-white/80 p-3 font-mono text-xs leading-5 text-zinc-700">
+            {formatJson(rawInput)}
+          </pre>
+        </ToolSection>
+      ) : null}
+
+      {part.state === "approval-requested" ? (
+        <ToolSection badge="需要用户决策" title="approval 请求">
+          <div className="rounded-md border border-amber-200 bg-white p-3">
+            <p className="text-xs leading-5 text-amber-900">
+              {toolName} 请求执行一个带副作用的服务端工具。批准后，前端会把
+              approval response 追加到消息里并自动续发，ToolLoopAgent 再继续执行。
+            </p>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              <ToolFact label="approvalId" mono value={part.approval.id} />
+              <ToolFact label="默认动作" value="等待用户批准或拒绝" />
+            </div>
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+              <button
+                className="h-9 rounded-md bg-zinc-950 px-3 text-sm font-medium text-white transition-colors hover:bg-zinc-800"
+                type="button"
+                onClick={() =>
+                  onApprove(part.approval.id, "用户批准 Agent 写入分析报告")
+                }
+              >
+                批准写入报告
+              </button>
+              <button
+                className="h-9 rounded-md border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100"
+                type="button"
+                onClick={() =>
+                  onDeny(part.approval.id, "用户拒绝 Agent 写入分析报告")
+                }
+              >
+                拒绝
+              </button>
+            </div>
+          </div>
+        </ToolSection>
+      ) : null}
+
+      {part.state === "approval-responded" ? (
+        <ToolSection
+          badge={part.approval.approved ? "approved=true" : "approved=false"}
+          title="approval 响应"
+        >
+          <div className="rounded-md bg-white/80 p-3 text-xs leading-5 text-zinc-700">
+            <p>
+              {part.approval.approved
+                ? "用户已批准。前端会自动续发消息，服务端继续执行 Agent loop。"
+                : "用户已拒绝。Agent 会收到拒绝原因并停止写入。"}
+            </p>
+            {part.approval.reason ? (
+              <p className="mt-2">原因：{part.approval.reason}</p>
+            ) : null}
+          </div>
+        </ToolSection>
       ) : null}
 
       {part.state === "output-available" ? (
-        <div className="mt-3 rounded-md bg-white p-2 font-mono text-xs leading-5 text-emerald-800">
-          {formatToolOutput(part)}
-        </div>
+        <ToolSection
+          badge={getValueSizeLabel(part.output)}
+          title="工具输出 output"
+        >
+          <div className="mb-2 rounded-md bg-emerald-50 p-3 text-xs leading-5 text-emerald-900">
+            {summarizeToolOutput(toolName, part.output)}
+          </div>
+          <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md bg-white p-3 font-mono text-xs leading-5 text-emerald-900">
+            {formatJson(part.output)}
+          </pre>
+        </ToolSection>
       ) : null}
 
       {part.state === "output-error" ? (
-        <div className="mt-3 rounded-md bg-white p-2 text-xs leading-5 text-red-700">
-          {part.errorText}
-        </div>
+        <ToolSection badge="error" title="工具错误">
+          <div className="rounded-md bg-white p-3 text-xs leading-5 text-red-700">
+            {part.errorText}
+          </div>
+        </ToolSection>
       ) : null}
+
+      {part.state === "output-denied" ? (
+        <ToolSection badge="denied" title="工具未执行">
+          <div className="rounded-md bg-white/80 p-3 text-xs leading-5 text-zinc-700">
+            工具执行已被用户拒绝，因此没有 output。拒绝原因会进入下一次模型调用上下文。
+          </div>
+        </ToolSection>
+      ) : null}
+
+      {providerMetadataSections.length > 0 ? (
+        <ToolSection badge={`${providerMetadataSections.length} 项`} title="provider metadata">
+          <div className="space-y-2">
+            {providerMetadataSections.map((section) => (
+              <div key={section.label}>
+                <p className="mb-1 text-xs font-medium text-zinc-700">
+                  {section.label}
+                </p>
+                <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md bg-white/80 p-3 font-mono text-xs leading-5 text-zinc-700">
+                  {formatJson(section.value)}
+                </pre>
+              </div>
+            ))}
+          </div>
+        </ToolSection>
+      ) : null}
+
+      <ToolSection
+        badge="raw"
+        defaultOpen={false}
+        title="完整 UI tool part 原始结构"
+      >
+        <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md bg-zinc-950 p-3 font-mono text-xs leading-5 text-zinc-100">
+          {formatJson(part)}
+        </pre>
+      </ToolSection>
     </div>
   );
 }
@@ -385,82 +606,364 @@ const toolLabels: Record<string, string> = {
   writeReport: "📝 写入报告",
 };
 
+const toolDescriptions: Record<string, string> = {
+  listFiles: "递归列出 data/agent-workspace 中的教学项目文件，帮助 Agent 建立项目地图。",
+  readFile: "读取 workspace 内指定文件的完整文本内容，供 Agent 做代码分析。",
+  searchFiles: "在 workspace 文件中搜索关键词，返回命中文件路径和上下文片段。",
+  writeReport:
+    "把分析报告写入 data/agent-workspace/reports/。这是有副作用的文件写入工具，所以需要 approval。",
+};
+
 const stateLabels: Record<string, string> = {
   "input-streaming": "Agent 正在思考...",
   "input-available": "Agent 已决策",
+  "approval-requested": "等待 approval",
+  "approval-responded": "approval 已确认",
   "output-available": "✅ 已完成",
   "output-error": "❌ 失败",
+  "output-denied": "已拒绝",
 };
 
-function formatToolInput(
-  part: ToolUIPart | DynamicToolUIPart,
-): string {
-  if (part.type !== "tool-invocation") {
-    return JSON.stringify(part.input, null, 2);
+const stateDescriptions: Record<string, string> = {
+  "input-streaming": "模型还在流式生成工具参数，input 可能是不完整的。",
+  "input-available": "工具参数已经生成完毕，接下来会执行工具或请求 approval。",
+  "approval-requested": "工具需要用户批准。此时 ToolLoopAgent 暂停，不会执行 execute。",
+  "approval-responded": "前端已记录用户批准或拒绝，下一次请求会带着这个决定继续。",
+  "output-available": "工具已经执行完毕，output 是服务端 execute 返回的真实结果。",
+  "output-error": "工具执行失败，errorText 是前端能看到的错误文本。",
+  "output-denied": "用户拒绝执行，工具没有运行，也不会产生 output。",
+};
+
+function getToolPartToneClassName(
+  state: string,
+  isLatestAgentMessage?: boolean,
+) {
+  if (state === "output-available") {
+    return "border-emerald-200 bg-emerald-50";
   }
 
-  const input = part.input;
-  if (!input || typeof input !== "object") {
-    return String(input ?? "");
+  if (state === "output-error") {
+    return "border-red-200 bg-red-50";
   }
 
-  const inputObj = input as Record<string, unknown>;
-  if ("path" in inputObj) {
-    return `path: ${String(inputObj.path)}`;
-  }
-  if ("pattern" in inputObj) {
-    return `pattern: ${String(inputObj.pattern)}`;
-  }
-  if ("filename" in inputObj) {
-    return `filename: ${String(inputObj.filename)}`;
+  if (state === "approval-requested") {
+    return "border-amber-200 bg-amber-50";
   }
 
-  return JSON.stringify(input, null, 2);
+  if (state === "approval-responded") {
+    return "border-sky-200 bg-sky-50";
+  }
+
+  if (isLatestAgentMessage) {
+    return "border-sky-200 bg-sky-50";
+  }
+
+  return "border-zinc-200 bg-white";
 }
 
-function formatToolOutput(part: ToolUIPart | DynamicToolUIPart) {
-  if (part.type !== "tool-invocation") {
-    if ("output" in part) {
-      return formatValue(part.output);
-    }
-    return "";
+function ToolStateTimeline({ part }: { part: ToolUIPart | DynamicToolUIPart }) {
+  const states = getTimelineStates(part);
+  const currentIndex = states.indexOf(part.state);
+
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {states.map((state, index) => {
+        const isCurrent = state === part.state;
+        const isPast = currentIndex !== -1 && index < currentIndex;
+
+        return (
+          <span
+            className={`rounded-full px-2 py-0.5 text-xs ${
+              isCurrent
+                ? "bg-zinc-950 text-white"
+                : isPast
+                  ? "bg-emerald-100 text-emerald-800"
+                  : "bg-white/80 text-zinc-500"
+            }`}
+            key={state}
+          >
+            {stateLabels[state] ?? state}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function ToolFact({
+  label,
+  mono,
+  value,
+}: {
+  label: string;
+  mono?: boolean;
+  value: React.ReactNode;
+}) {
+  return (
+    <div className="min-w-0 rounded-md bg-white/80 p-2">
+      <div className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+        {label}
+      </div>
+      <div
+        className={`mt-1 break-words text-xs leading-5 text-zinc-800 ${
+          mono ? "font-mono" : ""
+        }`}
+      >
+        {value || "无"}
+      </div>
+    </div>
+  );
+}
+
+function ToolInsight({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="rounded-md border border-zinc-200 bg-white/80 p-3">
+      <div className="text-xs font-semibold text-zinc-950">{title}</div>
+      <p className="mt-1 text-xs leading-5 text-zinc-600">{text}</p>
+    </div>
+  );
+}
+
+function ToolSection({
+  badge,
+  children,
+  defaultOpen = true,
+  title,
+}: {
+  badge?: string;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+  title: string;
+}) {
+  return (
+    <details
+      className="mt-3 rounded-md border border-zinc-200 bg-white/60"
+      open={defaultOpen}
+    >
+      <summary className="flex cursor-pointer items-center justify-between gap-3 px-3 py-2 text-xs font-semibold text-zinc-900">
+        <span>{title}</span>
+        {badge ? (
+          <span className="rounded-full bg-zinc-100 px-2 py-0.5 font-normal text-zinc-500">
+            {badge}
+          </span>
+        ) : null}
+      </summary>
+      <div className="border-t border-zinc-200 p-3">{children}</div>
+    </details>
+  );
+}
+
+function getTimelineStates(part: ToolUIPart | DynamicToolUIPart) {
+  const hasApproval = part.approval != null;
+
+  if (part.state === "output-error") {
+    return hasApproval
+      ? [
+          "input-streaming",
+          "input-available",
+          "approval-requested",
+          "approval-responded",
+          "output-error",
+        ]
+      : ["input-streaming", "input-available", "output-error"];
   }
 
-  const output = part.output;
-  if (!output || typeof output !== "object") {
-    return String(output ?? "");
+  if (part.state === "output-denied") {
+    return [
+      "input-streaming",
+      "input-available",
+      "approval-requested",
+      "output-denied",
+    ];
   }
 
-  const outputObj = output as Record<string, unknown>;
+  if (hasApproval) {
+    return [
+      "input-streaming",
+      "input-available",
+      "approval-requested",
+      "approval-responded",
+      "output-available",
+    ];
+  }
 
-  if ("files" in outputObj && Array.isArray(outputObj.files)) {
+  return ["input-streaming", "input-available", "output-available"];
+}
+
+function summarizeToolIntent(toolName: string, input: unknown) {
+  const inputObj = asRecord(input);
+
+  if (toolName === "listFiles") {
+    return "列出示例 workspace 的文件结构，帮助 Agent 决定后续该读取哪些文件。";
+  }
+
+  if (toolName === "readFile") {
+    return `读取文件 ${formatInlineValue(inputObj?.path)} 的完整内容。`;
+  }
+
+  if (toolName === "searchFiles") {
+    return `搜索关键词 ${formatInlineValue(inputObj?.pattern)}，返回命中文件和上下文片段。`;
+  }
+
+  if (toolName === "writeReport") {
+    const content = typeof inputObj?.content === "string" ? inputObj.content : "";
+    return `准备把 ${content.length} 个字符的 Markdown 报告写入 reports/${formatInlineValue(
+      inputObj?.filename,
+    )}。因为会改写文件，所以需要 approval。`;
+  }
+
+  return "模型决定调用这个工具。完整参数见 input 区块。";
+}
+
+function summarizeToolOutput(toolName: string, output: unknown) {
+  const outputObj = asRecord(output);
+
+  if (!outputObj) {
+    return `工具返回：${formatValue(output)}`;
+  }
+
+  if (toolName === "listFiles" && Array.isArray(outputObj.files)) {
     const files = outputObj.files as Array<Record<string, unknown>>;
-    return files
-      .map(
-        (f) =>
-          `${String(f.relativePath)} (${String(f.bytes)} bytes)`,
-      )
-      .join("\n");
+    const fileNames = files
+      .slice(0, 8)
+      .map((file) => String(file.relativePath))
+      .join("、");
+    const suffix = files.length > 8 ? ` 等 ${files.length} 个文件` : "";
+    return `列出了 ${files.length} 个文件。根目录：${formatInlineValue(
+      outputObj.root,
+    )}。文件：${fileNames}${suffix}`;
   }
 
-  if ("matches" in outputObj && Array.isArray(outputObj.matches)) {
+  if (toolName === "readFile" && typeof outputObj.content === "string") {
+    return `读取了 ${formatInlineValue(outputObj.relativePath)}，内容长度 ${
+      outputObj.content.length
+    } 个字符。`;
+  }
+
+  if (toolName === "searchFiles" && Array.isArray(outputObj.matches)) {
     const matches = outputObj.matches as Array<Record<string, unknown>>;
-    return matches
-      .map(
-        (m) =>
-          `${String(m.relativePath)}:\n  ${String(m.snippet).trim()}`,
-      )
-      .join("\n\n");
+    const paths = matches
+      .slice(0, 6)
+      .map((match) => String(match.relativePath))
+      .join("、");
+    return `搜索 ${formatInlineValue(outputObj.pattern)}，命中 ${
+      matches.length
+    } 处。命中文件：${paths || "无"}`;
   }
 
-  if ("content" in outputObj) {
-    const content = String(outputObj.content);
-    return content.length > 200
-      ? `${content.slice(0, 200)}...`
-      : content;
+  if (toolName === "writeReport") {
+    return `报告已写入 ${formatInlineValue(
+      outputObj.relativePath,
+    )}，字节数 ${formatInlineValue(outputObj.bytes)}。绝对路径：${formatInlineValue(
+      outputObj.absolutePath,
+    )}`;
   }
 
-  return formatValue(output);
+  if (typeof outputObj.action === "string") {
+    return `工具完成，action=${outputObj.action}。完整返回见 output JSON。`;
+  }
+
+  return "工具已返回结构化结果，完整内容见 output JSON。";
+}
+
+function getNoOutputText(state: string) {
+  if (state === "input-streaming") {
+    return "暂时没有 output。模型还在生成工具参数。";
+  }
+
+  if (state === "input-available") {
+    return "暂时没有 output。参数已生成，等待执行工具或请求 approval。";
+  }
+
+  if (state === "approval-requested") {
+    return "暂时没有 output。工具需要用户 approval，批准前不会执行 execute。";
+  }
+
+  if (state === "approval-responded") {
+    return "暂时没有 output。前端已写入 approval response，等待自动续发后继续。";
+  }
+
+  if (state === "output-denied") {
+    return "没有 output。用户拒绝了这次工具执行。";
+  }
+
+  if (state === "output-error") {
+    return "没有 output。工具执行失败，错误信息见工具错误区块。";
+  }
+
+  return "暂时没有 output。";
+}
+
+function getProviderMetadataSections(part: ToolUIPart | DynamicToolUIPart) {
+  const sections: Array<{ label: string; value: unknown }> = [];
+
+  if (part.callProviderMetadata) {
+    sections.push({
+      label: "callProviderMetadata",
+      value: part.callProviderMetadata,
+    });
+  }
+
+  if ("resultProviderMetadata" in part && part.resultProviderMetadata) {
+    sections.push({
+      label: "resultProviderMetadata",
+      value: part.resultProviderMetadata,
+    });
+  }
+
+  return sections;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function getValueSizeLabel(value: unknown) {
+  if (value === undefined) {
+    return "undefined";
+  }
+
+  if (value === null) {
+    return "null";
+  }
+
+  if (typeof value === "string") {
+    return `${value.length} chars`;
+  }
+
+  if (Array.isArray(value)) {
+    return `${value.length} items`;
+  }
+
+  if (typeof value === "object") {
+    return `${Object.keys(value).length} keys`;
+  }
+
+  return typeof value;
+}
+
+function formatInlineValue(value: unknown) {
+  if (value === undefined || value === null || value === "") {
+    return "未提供";
+  }
+
+  return String(value);
+}
+
+function formatJson(value: unknown) {
+  if (value === undefined) {
+    return "undefined";
+  }
+
+  try {
+    return JSON.stringify(value, null, 2) ?? String(value);
+  } catch {
+    return String(value);
+  }
 }
 
 function formatValue(value: unknown) {
@@ -472,5 +975,9 @@ function formatValue(value: unknown) {
     return value;
   }
 
-  return JSON.stringify(value, null, 2);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
